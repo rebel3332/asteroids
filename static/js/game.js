@@ -97,6 +97,7 @@
     let turretAngle = -Math.PI / 2; // смотрит вверх по умолчанию
     let lasers = []; // лазерные лучи
     let bgMusicStarted = false; // флаг для отслеживания начала музыки
+    let prizes = []; // Призы
 
     function rand(a,b){return Math.random()*(b-a)+a}
 
@@ -142,6 +143,20 @@
 
                 score += 1;
                 scoreEl.textContent = 'Очки: ' + score;
+
+                // Спавн приза
+                if (score % 10 === 0) {
+                    prizes.push({
+                        x: a.x,
+                        y: a.y,
+                        r: 18,
+                        vy: 1.8,
+                        rotation: 0,
+                        rotationSpeed: 0.05,
+                        glow: 0,
+                        glowSpeed: 0.02
+                    });
+                }
                 break;
                 }
             }
@@ -226,6 +241,30 @@
             }
         }
 
+        // Обновление призов
+        for (let i = prizes.length - 1; i >= 0; i--) {
+            const p = prizes[i];
+            
+            // Анимация падения
+            p.y += p.vy * dt * 0.06;
+            p.rotation += p.rotationSpeed * dt * 0.06;
+            
+            // Анимация свечения
+            p.glow += p.glowSpeed * dt * 0.06;
+            if (p.glow > 1) {
+                p.glow = 1;
+                p.glowSpeed = -0.02;
+            } else if (p.glow < 0.3) {
+                p.glow = 0.3;
+                p.glowSpeed = 0.02;
+            }
+            
+            // Удаление приза при выходе за экран
+            if (p.y > h + p.r) {
+                prizes.splice(i, 1);
+            }
+        }
+
     }
 
     function draw(){
@@ -245,6 +284,8 @@
         drawCityscape();
         // Рисую турель поверх города, чтобы она была на переднем плане, но позади метеоров и частиц дыма
         drawTurret();
+        // Рисую призы
+        drewPrize();
         // Рисую лазеры поверх турели
         drawLasers();
 
@@ -273,6 +314,33 @@
         // draw asteroids as meteors (foreground)
         for(const a of asteroids){
         drawMeteor(a);
+        }
+    }
+
+    function drewPrize(){
+        // Draw prizes
+        for (const p of prizes) {
+            ctx.save();
+            ctx.translate(p.x, p.y);
+            ctx.rotate(p.rotation);
+            
+            // Светящееся ядро
+            const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, p.r);
+            gradient.addColorStop(0, `rgba(255, 220, 0, ${p.glow})`);
+            gradient.addColorStop(0.7, `rgba(255, 200, 0, ${p.glow * 0.6})`);
+            gradient.addColorStop(1, `rgba(255, 150, 0, 0)`);
+            
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.arc(0, 0, p.r, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Контур
+            ctx.strokeStyle = `rgba(255, 255, 200, ${p.glow * 0.8})`;
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            
+            ctx.restore();
         }
     }
 
@@ -501,6 +569,48 @@
     }
 
     function hit(pos){
+        // Сбор призов
+        for (let i = prizes.length - 1; i >= 0; i--) {
+            const p = prizes[i];
+            const dx = pos.x - p.x;
+            const dy = pos.y - p.y;
+            
+            // Проверяем попадание в круг приза
+            if (dx * dx + dy * dy <= p.r * p.r * 2) {
+                // Удаляем приз
+                prizes.splice(i, 1);
+                
+                // Начисляем очки
+                score += 50;
+                scoreEl.textContent = 'Очки: ' + score;
+                
+                // Эффект сбора: золотые частицы
+                for (let j = 0; j < 25; j++) {
+                    particles.push({
+                        x: p.x,
+                        y: p.y,
+                        vx: rand(-2.5, 2.5),
+                        vy: rand(-2.5, -0.5), // летят вверх
+                        life: 600 + Math.random() * 400,
+                        t: 0,
+                        size: rand(2, 5),
+                        type: 'fire' // используем огненные частицы для золотого эффекта
+                    });
+                }
+                
+                // Звук сбора (безопасное воспроизведение)
+                try {
+                    // Создаём клон звука взрыва для сбора (тише и короче)
+                    const collectSound = explosionSound.cloneNode();
+                    collectSound.volume = basic_explosion_volume * 0.3;
+                    collectSound.play().catch(() => {});
+                } catch (e) {
+                    console.log('Звук сбора недоступен, но приз собран');
+                }
+                
+                // ВАЖНО: не прерываем функцию — лазер всё равно выстрелит в этом направлении
+            }
+        }
         // Турель
         const turretX = w / 2;
         const turretY = h - 30;// - h * 0.25; // чуть выше города
@@ -534,6 +644,9 @@
         //   const dx = pos.x - a.x, dy = pos.y - a.y;
         //   if(dx*dx+dy*dy <= a.r*a.r){ asteroids.splice(i,1); score += 1; scoreEl.textContent = 'Очки: '+score; return; }
         // }
+        // В функции hit()
+
+        
 
 
     }
