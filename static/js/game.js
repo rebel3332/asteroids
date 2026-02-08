@@ -24,13 +24,10 @@
         // Скрываем стартовый экран
         startScreen.style.display = 'none';
 
-        // Запускаем фоновую музыку
-        bgMusic.play().catch(()=>{});
+        resetGameState();
 
-        // Запускаем игровой цикл
-        last = performance.now(); 
-        lastSpawn = performance.now(); 
         running = true;
+        playBgMusic();
         requestAnimationFrame(frame);
     });
 
@@ -92,12 +89,26 @@
     let spawnInterval = 800;
     let running = true;
     let score = 0;
+    // Скорость спавна встеройдов
     let spawnInterval_start = 800;
     let spawnInterval_current = spawnInterval_start;
-    let spawnInterval_increase = 0.05; // скорость увеличения сложности
+    let spawnInterval_increase = 0.06; // скорость увеличения скорости спавна
+    // Скорость полета астеройдов
+    let asteroid_start_speed = 0.01;
+    let asteroids_speed_increase = 0.00015; // скорость увеличения сложности
+    let asteroids_speed_current = asteroid_start_speed;
+
+    // Счетчики призов
+    let prizeProgress = 0;
+    const PRIZE_THRESHOLD = 10;
+    // Колдаун для красного приза
+    let lastRedPrizeTime = 0;
+    const RED_PRIZE_COOLDOWN = 40000; // 15 сек
+
     let particles = [];
     let gameElapsedTime = 0; // for spotlight animation
-    let turretAngle = -Math.PI / 2; // смотрит вверх по умолчанию
+    // let turretAngle = -Math.PI / 2; // смотрит вверх по умолчанию
+    let turrets = []; // Массив всех турелей: [0] = основная (игрок), [1+] = автоматические
     let lasers = []; // лазерные лучи
     let bgMusicStarted = false; // флаг для отслеживания начала музыки
     let prizes = []; // Призы
@@ -113,13 +124,44 @@
 
 
     function spawn(){
-        const r = rand(14, 44);
+        const r = rand(24, 44);
         const vx = rand(-0.5, 0.5);
-        asteroids.push({x: rand(r, w-r), y: -r, r, vy: rand(1.2,3)+score*0.01, vx, angle: rand(0,Math.PI*2), spin: rand(-0.03,0.03)});
+        asteroids.push(
+            {
+                x: rand(r, w-r), 
+                y: -r, 
+                r, 
+                vy: rand(1.2,3) + asteroids_speed_current, 
+                vx, 
+                angle: rand(0,Math.PI*2), 
+                spin: rand(-0.03,0.03)});
     }
 
-    function update(dt){
+    function spawnPrize(x, y) {
+        // const isRedPrize = Math.random() < 0.5;
+        const now = performance.now();
+        let isRedPrize = false;
+        if (now - lastRedPrizeTime > RED_PRIZE_COOLDOWN) {
+            isRedPrize = true; // Math.random() < 0.4;
+            if (isRedPrize) lastRedPrizeTime = now;
+        }
+        prizes.push({
+            x,
+            y,
+            r: 18,
+            vy: isRedPrize ? 2.2 : 1.8,
+            rotation: 0,
+            rotationSpeed: 0.05,
+            glow: 0,
+            glowSpeed: 0.02,
+            type: isRedPrize ? 'red' : 'gold'
+        });
+    }
+
+    function update(dt, currentTime){
         gameElapsedTime += dt; // Track time for animations
+        asteroids_speed_current += asteroids_speed_increase;
+        spawnInterval_current -= spawnInterval_increase;
         // Проверка уничтожения астеройда лазерами
         for(let i = lasers.length - 1; i >= 0; i--){
             const l = lasers[i];
@@ -147,22 +189,32 @@
                 score += 1;
                 scoreEl.textContent = 'Очки: ' + score;
 
-                // Спавн приза
-                if (score % 10 === 0) {
-                    // 30% шанс на красный приз, 70% на золотой
-                    const isRedPrize = Math.random() < 0.3;
-                    prizes.push({
-                        x: a.x,
-                        y: a.y,
-                        r: 18,
-                        vy: isRedPrize ? 2.2 : 1.8, // Красные падают быстрее
-                        rotation: 0,
-                        rotationSpeed: 0.05,
-                        glow: 0,
-                        glowSpeed: 0.02,
-                        type: isRedPrize ? 'red' : 'gold' // Ключевое поле для различия
-                    });
+                // прогресс приза
+                prizeProgress++;
+
+                if (prizeProgress >= PRIZE_THRESHOLD) {
+                    prizeProgress -= PRIZE_THRESHOLD;
+
+                    spawnPrize(a.x, a.y);
                 }
+
+                // Спавн приза
+                // if (score % 10 === 0) {
+                //     // 30% шанс на красный приз, 70% на золотой
+                //     const isRedPrize = Math.random() < 0.5;
+                //     prizes.push({
+                //         x: a.x,
+                //         y: a.y,
+                //         r: 18,
+                //         vy: isRedPrize ? 2.2 : 1.8, // Красные падают быстрее
+                //         rotation: 0,
+                //         rotationSpeed: 0.05,
+                //         glow: 0,
+                //         glowSpeed: 0.02,
+                //         type: isRedPrize ? 'red' : 'gold' // Ключевое поле для различия
+                //     });
+                // }
+
                 break;
                 }
             }
@@ -228,6 +280,58 @@
             p.y += p.vy * dt * 0.06;
 
             if(p.t > p.life) particles.splice(i,1);
+        }
+
+        // Автоматическая стрельба для дополнительных турелей
+        for (let i = 1; i < turrets.length; i++) {
+            const turret = turrets[i];
+            
+            // Собираем ВСЕ астероиды в радиусе 400px
+            const candidates = [];
+            for (const a of asteroids) {
+                const dx = a.x - turret.x;
+                const dy = a.y - turret.y;
+                const dist = Math.sqrt(dx*dx + dy*dy);
+                if (dist < 400) {
+                    candidates.push({ asteroid: a, dist: dist });
+                }
+            }
+            
+            // Если есть цели — выбираем СЛУЧАЙНУЮ из ближайших 3
+            let target = null;
+            if (candidates.length > 0) {
+                // Сортируем по расстоянию
+                candidates.sort((a, b) => a.dist - b.dist);
+                // Берём случайную из первых 3 (или меньше, если целей мало)
+                const maxCandidates = Math.min(3, candidates.length);
+                const randomIndex = Math.floor(Math.random() * maxCandidates);
+                target = candidates[randomIndex].asteroid;
+            }
+            
+            // Если цель есть и прошёл кулдаун
+            if (target && (currentTime - turret.lastShot) > turret.cooldown) {
+                turret.angle = Math.atan2(target.y - turret.y, target.x - turret.x);
+                
+                // Выстрел
+                const barrelLength = 50;
+                lasers.push({
+                    x: turret.x + Math.cos(turret.angle) * barrelLength,
+                    y: turret.y + Math.sin(turret.angle) * barrelLength,
+                    angle: turret.angle,
+                    speed: 1000,
+                    life: 700,
+                    t: 0
+                });
+                
+                // Звук
+                try {
+                    const autoSound = laserSound.cloneNode();
+                    autoSound.volume = basic_laser_volume * 0.08;
+                    autoSound.play().catch(() => {});
+                } catch (e) {}
+                
+                turret.lastShot = currentTime;
+            }
         }
 
         //Обновление лазеров
@@ -411,30 +515,38 @@
     }
 
     function drawTurret(){
-        const x = w / 2;
-        const y = h - 30; //h * 0.25;
-        const barrelLength = 50;
+        for (const turret of turrets) {
+            ctx.save();
+            ctx.translate(turret.x, turret.y);
+            ctx.rotate(turret.angle);
 
-        ctx.save();
-        ctx.translate(x, y);
-        ctx.rotate(turretAngle);
+            // Ствол
+            ctx.fillStyle = '#555';
+            ctx.fillRect(0, -6, 50, 12);
+            
+            // Дульный срез
+            ctx.fillStyle = '#333';
+            ctx.fillRect(46, -8, 8, 16);
+            
+            ctx.restore();
 
-        // ствол
-        ctx.fillStyle = '#555';
-        ctx.fillRect(0, -6, barrelLength, 12);
-
-        // дульный срез
-        ctx.fillStyle = '#333';
-        ctx.fillRect(barrelLength - 4, -8, 8, 16);
-
-        ctx.restore();
-
-        // основание
-        ctx.beginPath();
-        ctx.fillStyle = '#222';
-        ctx.arc(x, y, 18, 0, Math.PI * 2);
-        ctx.fill();
+            // Основание: зелёное для игрока, красное для автоматических
+            ctx.beginPath();
+            ctx.fillStyle = turret.isPlayer ? '#4a4' : '#a44';
+            ctx.arc(turret.x, turret.y, 18, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Индикатор перезарядки (тонкий круг)
+            if (!turret.isPlayer) {
+                const reloadProgress = Math.min(1, (performance.now() - turret.lastShot) / turret.cooldown);
+                ctx.beginPath();
+                ctx.arc(turret.x, turret.y, 20, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * reloadProgress);
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
         }
+    }
 
 
     function drawSpotlights(){
@@ -579,12 +691,13 @@
 
     let last = performance.now();
     function frame(t){
-        let dt = t - last; if (!isFinite(dt) || dt <= 0) dt = 16; dt = Math.min(dt, 100);
+        let dt = t - last; 
+        if (!isFinite(dt) || dt <= 0) dt = 16; 
+        dt = Math.min(dt, 100);
         last = t;
         if(!running) return;
-        spawnInterval_current = Math.max(350, spawnInterval_current - spawnInterval_increase);
-        if(t - lastSpawn > spawnInterval){ spawn(); lastSpawn = t; spawnInterval = Math.max(350, spawnInterval_current); } //score*3
-        update(dt);
+        if(t - lastSpawn > spawnInterval){ spawn(); lastSpawn = t; spawnInterval = Math.max(350, spawnInterval_current); }
+        update(dt, t); // Передаём текущее время
         draw();
         requestAnimationFrame(frame);
     }
@@ -609,7 +722,7 @@
             if (dx * dx + dy * dy <= p.r * p.r * 2) {
                 // Определяем тип приза и параметры
                 const isRed = p.type === 'red';
-                const points = isRed ? 100 : 50; // Красный = 100 очков
+                const points = isRed ? 0 : 50; // Красный = 0 очков
                 const particleType = isRed ? 'redFire' : 'fire';
                 const particleCount = isRed ? 35 : 25; // Больше частиц для красного
                 
@@ -633,6 +746,57 @@
                         type: particleType
                     });
                 }
+
+                // Добавляем новую турель ТОЛЬКО для красного приза
+                if (p.type === 'red') {
+                    // Генерируем позицию в пределах города (нижние 25% экрана)
+                    const cityTop = h - h * 0.25;
+                    let newX, newY;
+                    let attempts = 0;
+                    
+                    // Ищем позицию без наложения на другие турели
+                    do {
+                        newX = rand(80, w - 80);
+                        newY = rand(cityTop + 30, h - 30);
+                        attempts++;
+                    } while (attempts < 20 && turrets.some(t => 
+                        Math.hypot(t.x - newX, t.y - newY) < 100
+                    ));
+                    
+                    // Добавляем турель
+                    // turrets.push({
+                    //     x: newX,
+                    //     y: newY,
+                    //     angle: -Math.PI / 2,
+                    //     lastShot: performance.now(),
+                    //     cooldown: rand(500, 800), // Случайная скорострельность
+                    //     isPlayer: false
+                    // });
+                    const cooldown = 1000; //rand(1800, 2500); //rand(500, 800);
+                    turrets.push({
+                        x: newX,
+                        y: newY,
+                        angle: -Math.PI / 2,
+                        // Ключевое исправление: случайная задержка от 0 до полного кулдауна
+                        lastShot: performance.now() - rand(0, cooldown), 
+                        cooldown: cooldown,
+                        isPlayer: false
+                    });
+                    
+                    // Визуальный эффект появления турели
+                    for (let j = 0; j < 15; j++) {
+                        particles.push({
+                            x: newX,
+                            y: newY,
+                            vx: rand(-2, 2),
+                            vy: rand(-3, -1),
+                            life: 400 + Math.random() * 300,
+                            t: 0,
+                            size: rand(3, 6),
+                            type: 'fire'
+                        });
+                    }
+                }
                 
                 // Звук: для красного приза громче и короче
                 try {
@@ -647,13 +811,26 @@
                 // ВАЖНО: не прерываем функцию — лазер всё равно выстрелит в этом направлении
             }
         }
-        // Турель
-        const turretX = w / 2;
-        const turretY = h - 30;// - h * 0.25; // чуть выше города
-        turretAngle = Math.atan2(
-            pos.y - turretY,
-            pos.x - turretX
-        );
+        // Основная турель (индекс 0) управляется игроком
+        const playerTurret = turrets[0];
+        playerTurret.angle = Math.atan2(pos.y - playerTurret.y, pos.x - playerTurret.x);
+
+        // Проверяем кулдаун для основной турели
+        if (performance.now() - playerTurret.lastShot > playerTurret.cooldown) {
+            const barrelLength = 50;
+            lasers.push({
+                x: playerTurret.x + Math.cos(playerTurret.angle) * barrelLength,
+                y: playerTurret.y + Math.sin(playerTurret.angle) * barrelLength,
+                angle: playerTurret.angle,
+                speed: 1200,
+                life: 600,
+                t: 0
+            });
+            
+            laserSound.currentTime = 0;
+            laserSound.play();
+            playerTurret.lastShot = performance.now();
+        }
 
         // Лазеры
         const barrelLength = 50;
@@ -703,19 +880,60 @@
         checkLeaderboardEligibility();
     }
 
+    function resetGameState() {
+        // Основные флаги и таймеры
+        running = false;
+        last = performance.now();
+        lastSpawn = last;
+
+        // Очки и UI
+        score = 0;
+        scoreEl.textContent = 'Очки: 0';
+
+        // Сложность
+        spawnInterval_current = spawnInterval_start;
+        spawnInterval = spawnInterval_start;
+        asteroids_speed_current = asteroid_start_speed;
+
+        // Игровые массивы
+        asteroids = [];
+        lasers = [];
+        particles = [];
+        prizes = [];
+
+        // Призы и кулдауны
+        prizeProgress = 0;
+        lastRedPrizeTime = 0;
+
+        // Анимации
+        gameElapsedTime = 0;
+
+        // Турели — только основная
+        turrets = [{
+            x: w / 2,
+            y: h - 30,
+            angle: -Math.PI / 2,
+            lastShot: performance.now(),
+            cooldown: 300,
+            isPlayer: true
+        }];
+
+        // Музыка
+        bgMusic.pause();
+        bgMusic.currentTime = 0;
+        bgMusicStarted = false;
+    }
+
+
     restartBtn.addEventListener('click', ()=>{
-        overlay.classList.add('hidden'); 
-        overlay.style.display = 'none'; 
-        overlay.style.pointerEvents = 'none'; 
-        asteroids=[]; score=0; 
-        scoreEl.textContent='Очки: 0'; 
-        running=true; 
-        last = performance.now(); 
-        lastSpawn = performance.now(); 
+        overlay.classList.add('hidden');
+        overlay.style.display = 'none';
+        overlay.style.pointerEvents = 'none';
 
-        // Продолжаем воспроизведение музыки
-        bgMusic.play().catch(()=>{});
+        resetGameState();
 
+        running = true;
+        playBgMusic();
         requestAnimationFrame(frame);
     });
 
