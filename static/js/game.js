@@ -70,12 +70,19 @@
     const explosionSound = new Audio('/static/explosion.wav');
     const basic_explosion_volume = 0.2;
     explosionSound.volume = basic_explosion_volume * 0.1;
+    // Звук появления автотурели
+    const turretSpawnSound = new Audio('/static/turret_spawn.mp3');
+    const basic_turret_spawn_volume = 1.5;
+    turretSpawnSound.volume = basic_turret_spawn_volume * 0.1;
+    // Звук исчезновения автотурели
+    const turretDespawnSound = new Audio('/static/turret_despawn.mp3');
+    const basic_turret_despawn_volume = 1.2;
+    turretDespawnSound.volume = basic_turret_despawn_volume * 0.1;
     // Фоновая музыка
     const bgMusic = new Audio('/static/bgm.mp3');
     const basic_bg_volume = 0.1;
     bgMusic.loop = true; // зацикливаем
     bgMusic.volume = basic_bg_volume * 0.1; // начальная громкость
-
 
     function resize() { 
         w = canvas.width = window.innerWidth; 
@@ -92,18 +99,35 @@
     // Скорость спавна встеройдов
     let spawnInterval_start = 800;
     let spawnInterval_current = spawnInterval_start;
-    let spawnInterval_increase = 0.06; // скорость увеличения скорости спавна
+    let spawnInterval_increase = 0.01; // скорость увеличения скорости спавна
     // Скорость полета астеройдов
     let asteroid_start_speed = 0.01;
-    let asteroids_speed_increase = 0.00015; // скорость увеличения сложности
+    let asteroids_speed_increase = 0.0001; // скорость увеличения сложности
     let asteroids_speed_current = asteroid_start_speed;
+    // Автотурель
+    const turel_start_ammo = 50; // начальное количество патронов для автотурели
+    // Босс
+    let bosses = [];
+    let bossWave = 0;
+    let bossActive = false;
+    const BOSS_SCORE_STEP = 10; // шаг движения для boss_delta_score_spawn
+    let boss_delta_score_spawn = 200; // на какое число очков отодвинуть спавн следующего босса
+    let nextBossScore = 150; // очки, при которых появится следующий босс
+    let boss_spell_time = 3000; // время до использования босом специального умения
+    let boss_spell_chance = 0.1; // вероятность использования умения при условии что время вышло
+    let lastBeamUseTime = 0;
+    const BEAM_COOLDOWN = 3000; // минимальный интервал между использованием боссами способностей, мс (3 сек)
+    // Текст "Волна N"
+    let waveText = '';
+    let waveTextTime = 0;
+    const WAVE_TEXT_DURATION = 2500; // мс
 
     // Счетчики призов
     let prizeProgress = 0;
     const PRIZE_THRESHOLD = 10;
-    // Колдаун для красного приза
-    let lastRedPrizeTime = 0;
-    const RED_PRIZE_COOLDOWN = 40000; // 15 сек
+    // // Колдаун для красного приза
+    // let lastRedPrizeTime = 0;
+    // const RED_PRIZE_COOLDOWN = 40000; // 15 сек
 
     let particles = [];
     let gameElapsedTime = 0; // for spotlight animation
@@ -137,31 +161,160 @@
                 spin: rand(-0.03,0.03)});
     }
 
-    function spawnPrize(x, y) {
-        // const isRedPrize = Math.random() < 0.5;
+    function spawnPrize(x, y, isWaveReward = false) {
         const now = performance.now();
-        let isRedPrize = false;
-        if (now - lastRedPrizeTime > RED_PRIZE_COOLDOWN) {
-            isRedPrize = true; // Math.random() < 0.4;
-            if (isRedPrize) lastRedPrizeTime = now;
+        let type = 'gold'; // по умолчанию золотой
+
+        if (isWaveReward) {
+            type = 'red'; // приз за волну — красный
+            lastRedPrizeTime = now; // чтобы кулдаун считался
         }
+
         prizes.push({
             x,
             y,
             r: 18,
-            vy: isRedPrize ? 2.2 : 1.8,
+            vy: type === 'red' ? 2.2 : 1.8,
             rotation: 0,
             rotationSpeed: 0.05,
             glow: 0,
             glowSpeed: 0.02,
-            type: isRedPrize ? 'red' : 'gold'
+            type
         });
+    }
+
+    function createBoss(side = 'left') {
+        return {
+            x: side === 'left' ? -140 : w + 140,
+            y: h * (0.2 + Math.random() * 0.25),
+            w: 120,
+            h: 60,
+            vx: 2 + Math.random(),
+            direction: side === 'left' ? 1 : -1,
+            hp: 10,
+            maxHp: 10,
+            alive: true,
+            
+            spawnTime: performance.now(),   // ⏱ когда появился
+            beamUsed: false,                // 🔮 уже стрелял лучом
+            beamTarget: null                // 🎯 цель (турель)
+        };
+    }
+
+    function spawnBossWave() {
+        bossWave++;
+        bossActive = true;
+
+        for (let i = 0; i < bossWave; i++) {
+            const side = i % 2 === 0 ? 'left' : 'right';
+            bosses.push(createBoss(side));
+        }
+    }
+
+    function updateBosses(dt) {
+        const now = performance.now();
+
+        for (const boss of bosses) {
+            if (!boss.alive) continue;
+
+            boss.x += boss.vx * boss.direction;
+
+            if (boss.x < 40) boss.direction = 1;
+            if (boss.x + boss.w > w - 40) boss.direction = -1;
+
+            // 🔮 Атака фиолетовым лучом
+            if (
+                !boss.beamUsed &&
+                now - boss.spawnTime > boss_spell_time &&           // время которое босс ждет перед использованием умения
+                now - lastBeamUseTime > BEAM_COOLDOWN &&            // и при условии что с момента последнего использования луча прошло достаточно времени
+                Math.random() < boss_spell_chance                      // Вероятность использования умения
+            ) {
+                // ищем автотурели
+                const autoTurrets = turrets.filter(t => !t.isPlayer && !t.disabled);
+
+                if (autoTurrets.length > 0) {
+                    boss.beamUsed = true;
+                    boss.beamTarget = autoTurrets[Math.floor(Math.random() * autoTurrets.length)];
+                    boss.beamTarget.disabled = true;     // ❌ отключаем турель
+                    lastBeamUseTime = now; // фиксируем момент использования
+                }
+            }
+        }
+    }
+
+    function onBossKilled(boss) {
+        // ✅ ВСЕГДА освобождаем турель этого босса
+        if (boss.beamTarget) {
+            boss.beamTarget.disabled = false; // ✅ возвращаем турель
+        }
+        // Проверяем, закончилась ли волна
+        if (bosses.every(b => !b.alive)) {
+            bossActive = false;
+            bosses = [];
+
+            spawnPrize(w / 2, h * 0.3, true); // приз за волну
+            // 📢 Показ текста волны
+            waveText = `Волна ${bossWave}`;
+            waveTextTime = performance.now();
+        }
+    }
+
+    function createExplosion(x, y) {
+        for (let i = 0; i < 12; i++) {
+            particles.push({
+                x,
+                y,
+                vx: rand(-3, 3),
+                vy: rand(-3, 3),
+                life: 300 + Math.random() * 300,
+                t: 0,
+                size: rand(3, 6),
+                type: 'fire'
+            });
+        }
+
+        explosionSound.currentTime = 0;
+        explosionSound.play().catch(()=>{});
     }
 
     function update(dt, currentTime){
         gameElapsedTime += dt; // Track time for animations
         asteroids_speed_current += asteroids_speed_increase;
         spawnInterval_current -= spawnInterval_increase;
+
+        if (score >= nextBossScore && !bossActive) {
+            spawnBossWave();
+            boss_delta_score_spawn += BOSS_SCORE_STEP; // увеличиваем шаг для следующего босса, чтобы они появлялись реже по мере роста сложности
+            nextBossScore += boss_delta_score_spawn;
+        }
+
+        // Проверка попадания лазера в босса
+        for (let i = lasers.length - 1; i >= 0; i--) {
+            const l = lasers[i];
+
+            for (const boss of bosses) {
+                if (!boss.alive) continue;
+
+                if (
+                    l.x > boss.x &&
+                    l.x < boss.x + boss.w &&
+                    l.y > boss.y &&
+                    l.y < boss.y + boss.h
+                ) {
+                    lasers.splice(i, 1);
+                    boss.hp--;
+
+                    createExplosion(l.x, l.y);
+
+                    if (boss.hp <= 0) {
+                        boss.alive = false;
+                        onBossKilled(boss);
+                    }
+                    break;
+                }
+            }
+        }
+
         // Проверка уничтожения астеройда лазерами
         for(let i = lasers.length - 1; i >= 0; i--){
             const l = lasers[i];
@@ -227,7 +380,8 @@
             ){
                 lasers.splice(i, 1);
             }
-    }
+        }
+
 
         // update asteroids
         for(let i=asteroids.length-1;i>=0;i--){
@@ -285,6 +439,8 @@
         // Автоматическая стрельба для дополнительных турелей
         for (let i = 1; i < turrets.length; i++) {
             const turret = turrets[i];
+
+            if (turret.disabled) continue; // ❌ под лучом — не работает
             
             // Собираем ВСЕ астероиды в радиусе 400px
             const candidates = [];
@@ -320,7 +476,8 @@
                     angle: turret.angle,
                     speed: 1000,
                     life: 700,
-                    t: 0
+                    t: 0,
+                    color: 'red' // 🔴 автотурель
                 });
                 
                 // Звук
@@ -329,10 +486,42 @@
                     autoSound.volume = basic_laser_volume * 0.08;
                     autoSound.play().catch(() => {});
                 } catch (e) {}
+
+                if (turret.ammo > 0){
+                    turret.ammo--; // Уменишить оставшиеся патроны
+                }
+                if (turret.ammo <= 0) {
+                // 🔊 звук исчезновения автотурели
+                try {
+                    const despawnSound = turretDespawnSound.cloneNode();
+                    despawnSound.volume = basic_turret_despawn_volume * 0.15;
+                    despawnSound.play().catch(() => {});
+                } catch (e) {}
+
+                // 💥 небольшой визуальный эффект
+                for (let j = 0; j < 12; j++) {
+                    particles.push({
+                        x: turret.x,
+                        y: turret.y,
+                        vx: rand(-2, 2),
+                        vy: rand(-2, 2),
+                        life: 300 + Math.random() * 200,
+                        t: 0,
+                        size: rand(3, 5),
+                        type: 'fire'
+                    });
+                }
+
+                turrets.splice(i, 1);
+                continue;
+            }
                 
                 turret.lastShot = currentTime;
             }
         }
+
+        // Обновление Боссов
+        updateBosses(dt);
 
         //Обновление лазеров
         for(let i = lasers.length - 1; i >= 0; i--){
@@ -394,11 +583,10 @@
         drawCityscape();
         // Рисую турель поверх города, чтобы она была на переднем плане, но позади метеоров и частиц дыма
         drawTurret();
+
         // Рисую призы
         drewPrize();
-        // Рисую лазеры поверх турели
-        drawLasers();
-
+        
         // draw particles (smoke trail: dark gray/black)
         for(const p of particles){
             const lifeRatio = 1 - (p.t / p.life);
@@ -428,8 +616,124 @@
 
         // draw asteroids as meteors (foreground)
         for(const a of asteroids){
-        drawMeteor(a);
+            drawMeteor(a);
         }
+        // Нарисовать Боссов
+        drawBosses();
+        // Нарисовать лучи Боссов поверх всего
+        drawBossBeams();
+        // Рисую лазеры поверх турели
+        drawLasers();
+        // Вывод текста волны
+        drawWaveText();
+    }
+
+    function drawWaveText() {
+        if (!waveText) return;
+
+        const now = performance.now();
+        const elapsed = now - waveTextTime;
+
+        if (elapsed > WAVE_TEXT_DURATION) {
+            waveText = '';
+            return;
+        }
+
+        // Плавное появление + исчезновение
+        let alpha = 1;
+        if (elapsed < 400) {
+            alpha = elapsed / 400;
+        } else if (elapsed > WAVE_TEXT_DURATION - 600) {
+            alpha = (WAVE_TEXT_DURATION - elapsed) / 600;
+        }
+
+        ctx.save();
+        ctx.globalAlpha = alpha;
+
+        ctx.font = 'bold 56px Arial';
+        ctx.fillStyle = '#fff';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        // Тень для читаемости
+        ctx.shadowColor = 'rgba(0,0,0,0.8)';
+        ctx.shadowBlur = 10;
+
+        ctx.fillText(waveText, w / 2, h * 0.3);
+
+        ctx.restore();
+    }
+
+
+    function drawBossBeams() {
+        for (const boss of bosses) {
+            if (!boss.alive || !boss.beamTarget) continue;
+
+            const t = boss.beamTarget;
+
+            ctx.save();
+            ctx.strokeStyle = 'rgba(180, 80, 255, 0.9)';
+            ctx.lineWidth = 5;
+            ctx.shadowColor = 'rgba(200, 100, 255, 1)';
+            ctx.shadowBlur = 20;
+
+            ctx.beginPath();
+            ctx.moveTo(boss.x + boss.w / 2, boss.y + boss.h / 2);
+            ctx.lineTo(t.x, t.y);
+            ctx.stroke();
+            ctx.restore();
+        }
+    }
+
+    function drawBosses() {
+        for (const boss of bosses) {
+            if (!boss.alive) continue;
+
+            // корпус
+            ctx.fillStyle = '#aaa';
+            ctx.beginPath();
+            ctx.ellipse(
+                boss.x + boss.w / 2,
+                boss.y + boss.h / 2,
+                boss.w / 2,
+                boss.h / 3,
+                0, 0, Math.PI * 2
+            );
+            ctx.fill();
+
+            // купол
+            ctx.fillStyle = '#66f';
+            ctx.beginPath();
+            ctx.ellipse(
+                boss.x + boss.w / 2,
+                boss.y + boss.h / 2 - 10,
+                boss.w / 4,
+                boss.h / 4,
+                0, 0, Math.PI * 2
+            );
+            ctx.fill();
+
+            drawBossHpBar(boss);
+        }
+    }
+
+
+    function drawBossHpBar(boss) {
+        const barWidth = 120;
+        const barHeight = 8;
+        const x = boss.x + boss.w / 2 - barWidth / 2;
+        const y = boss.y - 14;
+
+        ctx.fillStyle = 'red';
+        ctx.fillRect(x, y, barWidth, barHeight);
+
+        ctx.fillStyle = 'lime';
+        ctx.fillRect(
+            x,
+            y,
+            barWidth * (boss.hp / boss.maxHp),
+            barHeight
+        );
     }
 
     function drewPrize(){
@@ -516,6 +820,11 @@
 
     function drawTurret(){
         for (const turret of turrets) {
+            let baseColor = turret.isPlayer ? '#4a4' : '#a44';
+            if (turret.disabled) {
+                baseColor = '#a0f'; // 💜 фиолетовый
+            }
+
             ctx.save();
             ctx.translate(turret.x, turret.y);
             ctx.rotate(turret.angle);
@@ -532,7 +841,7 @@
 
             // Основание: зелёное для игрока, красное для автоматических
             ctx.beginPath();
-            ctx.fillStyle = turret.isPlayer ? '#4a4' : '#a44';
+            ctx.fillStyle = baseColor;
             ctx.arc(turret.x, turret.y, 18, 0, Math.PI * 2);
             ctx.fill();
             
@@ -544,6 +853,17 @@
                 ctx.strokeStyle = '#fff';
                 ctx.lineWidth = 2;
                 ctx.stroke();
+                // Кол-во патронов над турелью
+                ctx.fillStyle = turret.disabled ? '#c9f' : '#fff';
+                ctx.font = 'bold 14px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'bottom';
+
+                ctx.fillText(
+                    turret.ammo,
+                    turret.x,
+                    turret.y - 28
+                );
             }
         }
     }
@@ -620,22 +940,31 @@
 
     function drawLasers(){
         for(const l of lasers){
-        ctx.save();
+            ctx.save();
 
-        ctx.strokeStyle = 'rgba(255, 230, 120, 0.9)';
-        ctx.lineWidth = 3;
-        ctx.shadowColor = 'rgba(255, 220, 100, 0.8)';
-        ctx.shadowBlur = 15;
+            ctx.lineWidth = 3;
 
-        ctx.beginPath();
-        ctx.moveTo(l.x, l.y);
-        ctx.lineTo(
-            l.x - Math.cos(l.angle) * 30,
-            l.y - Math.sin(l.angle) * 30
-        );
-        ctx.stroke();
+            // Цвет лазера
+            ctx.strokeStyle = l.color || 'cyan';
 
-        ctx.restore();
+            // 🔴 Свечение ТОЛЬКО для автотурелей
+            if (l.color === 'red') {
+                ctx.shadowColor = 'red';
+                ctx.shadowBlur = 12;
+            } else {
+                ctx.shadowColor = 'cyan';
+                ctx.shadowBlur = 8;
+            }
+
+            ctx.beginPath();
+            ctx.moveTo(l.x, l.y);
+            ctx.lineTo(
+                l.x - Math.cos(l.angle) * 30,
+                l.y - Math.sin(l.angle) * 30
+            );
+            ctx.stroke();
+
+            ctx.restore();
         }
     }
 
@@ -780,8 +1109,15 @@
                         // Ключевое исправление: случайная задержка от 0 до полного кулдауна
                         lastShot: performance.now() - rand(0, cooldown), 
                         cooldown: cooldown,
-                        isPlayer: false
+                        isPlayer: false,
+                        ammo: turel_start_ammo // Добавляем жизни для новых турелей
                     });
+                    // 🔊 звук появления турели
+                    try {
+                        const spawnSound = turretSpawnSound.cloneNode();
+                        spawnSound.volume = basic_turret_spawn_volume * 0.2;
+                        spawnSound.play().catch(() => {});
+                    } catch (e) {}
                     
                     // Визуальный эффект появления турели
                     for (let j = 0; j < 15; j++) {
@@ -824,9 +1160,10 @@
                 angle: playerTurret.angle,
                 speed: 1200,
                 life: 600,
-                t: 0
+                t: 0,
+                color: 'cyan' // 🔵 игрок
             });
-            
+
             laserSound.currentTime = 0;
             laserSound.play();
             playerTurret.lastShot = performance.now();
@@ -922,6 +1259,12 @@
         bgMusic.pause();
         bgMusic.currentTime = 0;
         bgMusicStarted = false;
+
+        // Боссы
+        bosses = [];
+        bossWave = 0;
+        bossActive = false;
+        nextBossScore = BOSS_SCORE_STEP;
     }
 
 
