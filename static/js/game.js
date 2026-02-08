@@ -13,6 +13,46 @@
     const showLbBtn = document.getElementById('show-leaderboard');
     const closeLbBtn = document.getElementById('close-leaderboard');
 
+    const menuBtn = document.getElementById('menu-btn');
+    const menuPanel = document.getElementById('menu-panel');
+    const volumeSlider = document.getElementById('volume-slider');
+    // Запуск игры при нажатии на кнопку "Начать игру"
+    const startScreen = document.getElementById('start-screen');
+    const startBtn = document.getElementById('start-btn');
+
+    startBtn.addEventListener('click', ()=>{
+        // Скрываем стартовый экран
+        startScreen.style.display = 'none';
+
+        // Запускаем фоновую музыку
+        bgMusic.play().catch(()=>{});
+
+        // Запускаем игровой цикл
+        last = performance.now(); 
+        lastSpawn = performance.now(); 
+        running = true;
+        requestAnimationFrame(frame);
+    });
+
+    // Открытие/закрытие меню
+    menuBtn.addEventListener('click', ()=>{
+        if(menuPanel.style.display === 'none'){
+            menuPanel.style.display = 'block';
+        } else {
+            menuPanel.style.display = 'none';
+        }
+    });
+
+    // Изменение громкости
+    volumeSlider.addEventListener('input', (e)=>{
+        const vol = parseFloat(e.target.value);
+        laserSound.volume = basic_laser_volume * vol;
+        explosionSound.volume = basic_explosion_volume * vol;
+        bgMusic.volume = basic_bg_volume * vol; // музыка тоже регулируется
+        localStorage.setItem('gameVolume', vol);
+    });
+
+
     const ctx = canvas.getContext('2d');
     let w = 0, h = 0;
 
@@ -27,10 +67,17 @@
     cityscapeImg.src = '/static/city.png';
     // Звук выстрела лазера
     const laserSound = new Audio('/static/laser.wav');
-    laserSound.volume = 0.3;
+    const basic_laser_volume = 0.3;
+    laserSound.volume = basic_laser_volume * 0.1;
     // Звук взрыва астеройда
     const explosionSound = new Audio('/static/explosion.wav');
-    explosionSound.volume = 0.2;
+    const basic_explosion_volume = 0.2;
+    explosionSound.volume = basic_explosion_volume * 0.1;
+    // Фоновая музыка
+    const bgMusic = new Audio('/static/bgm.mp3');
+    const basic_bg_volume = 0.1;
+    bgMusic.loop = true; // зацикливаем
+    bgMusic.volume = basic_bg_volume * 0.1; // начальная громкость
 
 
     function resize() { 
@@ -49,8 +96,17 @@
     let gameElapsedTime = 0; // for spotlight animation
     let turretAngle = -Math.PI / 2; // смотрит вверх по умолчанию
     let lasers = []; // лазерные лучи
+    let bgMusicStarted = false; // флаг для отслеживания начала музыки
 
     function rand(a,b){return Math.random()*(b-a)+a}
+
+    function playBgMusic(){
+        if(!bgMusicStarted){
+            bgMusic.play().catch(()=>{}); // catch, чтобы ошибки на мобильных не мешали
+            bgMusicStarted = true;
+        }
+    }
+
 
     function spawn(){
         const r = rand(14, 44);
@@ -79,8 +135,10 @@
                 asteroids.splice(j, 1);
                 lasers.splice(i, 1);
 
-                explosionSound.currentTime = 0;
-                explosionSound.play().catch(()=>{});
+                // explosionSound.currentTime = 0;
+                // explosionSound.play().catch(()=>{});
+                // Взрыв
+                explodeAsteroid(a);
 
                 score += 1;
                 scoreEl.textContent = 'Очки: ' + score;
@@ -136,11 +194,19 @@
 
         // update particles
         for(let i=particles.length-1;i>=0;i--){
-        const p = particles[i];
-        p.t += dt;
-        p.x += p.vx * dt * 0.06;
-        p.y += p.vy * dt * 0.06 + 0.02 * dt * 0.06;
-        if(p.t > p.life) particles.splice(i,1);
+            const p = particles[i];
+            p.t += dt;
+
+            // Гравитация для каменных осколков
+            if(p.type === 'rock'){
+                const gravity = 0.1; // сила тяжести, можно регулировать
+                p.vy += gravity * dt * 0.06;
+            }
+
+            p.x += p.vx * dt * 0.06;
+            p.y += p.vy * dt * 0.06;
+
+            if(p.t > p.life) particles.splice(i,1);
         }
 
         //Обновление лазеров
@@ -184,14 +250,24 @@
 
         // draw particles (smoke trail: dark gray/black)
         for(const p of particles){
-        const lifeRatio = 1 - (p.t / p.life);
-        ctx.beginPath();
-        // smoke: starts light gray, darkens to black, expands then fades
-        const opacity = 0.6 * lifeRatio;
-        const grayVal = Math.floor(140 - 100 * (1 - lifeRatio)); // starts light, goes dark
-        ctx.fillStyle = `rgba(${grayVal},${grayVal},${grayVal},${opacity})`;
-        ctx.arc(p.x, p.y, Math.max(2, p.size * (1 + lifeRatio*0.5)), 0, Math.PI*2);
-        ctx.fill();
+            const lifeRatio = 1 - (p.t / p.life);
+            ctx.beginPath();
+            let opacity = lifeRatio;
+
+            if(p.type === 'smoke'){
+                const grayVal = Math.floor(140 - 100 * (1 - lifeRatio));
+                ctx.fillStyle = `rgba(${grayVal},${grayVal},${grayVal},${opacity * 0.6})`;
+            } else if(p.type === 'rock'){
+                const grayVal = Math.floor(100 + 50 * lifeRatio);
+                ctx.fillStyle = `rgba(${grayVal},${grayVal},${grayVal},${opacity})`;
+            } else if(p.type === 'fire'){
+                const r = Math.floor(255);
+                const g = Math.floor(150 * lifeRatio);
+                ctx.fillStyle = `rgba(${r},${g},0,${opacity})`;
+            }
+
+            ctx.arc(p.x, p.y, Math.max(1, p.size * (1 + lifeRatio*0.5)), 0, Math.PI*2);
+            ctx.fill();
         }
 
         // draw asteroids as meteors (foreground)
@@ -369,6 +445,41 @@
         }
     }
 
+    function explodeAsteroid(a){
+        const pieces = Math.floor(a.r / 2); // количество осколков зависит от размера астероида
+
+        for(let i = 0; i < pieces; i++){
+            // Каменные осколки
+            particles.push({
+                x: a.x,
+                y: a.y,
+                vx: rand(-2,2),
+                vy: rand(-2,2),
+                life: 400 + Math.random() * 400,
+                t: 0,
+                size: rand(a.r*0.1, a.r*0.4),
+                type: 'rock'
+            });
+
+            // Огненные искры
+            particles.push({
+                x: a.x,
+                y: a.y,
+                vx: rand(-3,3),
+                vy: rand(-3,3),
+                life: 300 + Math.random() * 300,
+                t: 0,
+                size: rand(a.r*0.05, a.r*0.15),
+                type: 'fire'
+            });
+        }
+
+        // Проигрываем звук взрыва
+        explosionSound.currentTime = 0;
+        explosionSound.play().catch(()=>{});
+    }
+
+
     let last = performance.now();
     function frame(t){
         let dt = t - last; if (!isFinite(dt) || dt <= 0) dt = 16; dt = Math.min(dt, 100);
@@ -379,7 +490,7 @@
         draw();
         requestAnimationFrame(frame);
     }
-    requestAnimationFrame(frame);
+    //requestAnimationFrame(frame);
 
     function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
 
@@ -436,11 +547,27 @@
         overlay.classList.remove('hidden');
         overlay.style.display = 'flex';
         overlay.style.pointerEvents = 'auto';
+
+        // Пауза фоновой музыки
+        bgMusic.pause();
+
         checkLeaderboardEligibility();
     }
 
     restartBtn.addEventListener('click', ()=>{
-        overlay.classList.add('hidden'); overlay.style.display = 'none'; overlay.style.pointerEvents = 'none'; asteroids=[]; score=0; scoreEl.textContent='Очки: 0'; running=true; last = performance.now(); lastSpawn = performance.now(); requestAnimationFrame(frame);
+        overlay.classList.add('hidden'); 
+        overlay.style.display = 'none'; 
+        overlay.style.pointerEvents = 'none'; 
+        asteroids=[]; score=0; 
+        scoreEl.textContent='Очки: 0'; 
+        running=true; 
+        last = performance.now(); 
+        lastSpawn = performance.now(); 
+
+        // Продолжаем воспроизведение музыки
+        bgMusic.play().catch(()=>{});
+
+        requestAnimationFrame(frame);
     });
 
     async function checkLeaderboardEligibility(){

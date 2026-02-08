@@ -6,3 +6,10 @@ html,body{height:100%;margin:0;font-family:Arial, sans-serif}
 .hidden{display:none}
 #gameover{background:#fff;padding:20px;border-radius:8px;text-align:center}
 #leaderboard-panel{position:fixed;right:12px;top:12px;background:#fff;padding:12px;border-radius:6px;z-index:40}
+#menu-panel {
+    transition: opacity 0.2s ease;
+}
+#menu-panel.show {
+    display: block;
+    opacity: 1;
+}
