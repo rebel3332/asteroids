@@ -92,6 +92,9 @@
     let spawnInterval = 800;
     let running = true;
     let score = 0;
+    let spawnInterval_start = 800;
+    let spawnInterval_current = spawnInterval_start;
+    let spawnInterval_increase = 0.05; // скорость увеличения сложности
     let particles = [];
     let gameElapsedTime = 0; // for spotlight animation
     let turretAngle = -Math.PI / 2; // смотрит вверх по умолчанию
@@ -146,15 +149,18 @@
 
                 // Спавн приза
                 if (score % 10 === 0) {
+                    // 30% шанс на красный приз, 70% на золотой
+                    const isRedPrize = Math.random() < 0.3;
                     prizes.push({
                         x: a.x,
                         y: a.y,
                         r: 18,
-                        vy: 1.8,
+                        vy: isRedPrize ? 2.2 : 1.8, // Красные падают быстрее
                         rotation: 0,
                         rotationSpeed: 0.05,
                         glow: 0,
-                        glowSpeed: 0.02
+                        glowSpeed: 0.02,
+                        type: isRedPrize ? 'red' : 'gold' // Ключевое поле для различия
                     });
                 }
                 break;
@@ -305,6 +311,11 @@
                 const r = Math.floor(255);
                 const g = Math.floor(150 * lifeRatio);
                 ctx.fillStyle = `rgba(${r},${g},0,${opacity})`;
+            } else if(p.type === 'redFire'){
+                const r = Math.floor(255);
+                const g = Math.floor(60 * lifeRatio);
+                const b = Math.floor(60 * lifeRatio);
+                ctx.fillStyle = `rgba(${r},${g},${b},${opacity * 1.2})`; // Ярче
             }
 
             ctx.arc(p.x, p.y, Math.max(1, p.size * (1 + lifeRatio*0.5)), 0, Math.PI*2);
@@ -324,21 +335,39 @@
             ctx.translate(p.x, p.y);
             ctx.rotate(p.rotation);
             
-            // Светящееся ядро
             const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, p.r);
-            gradient.addColorStop(0, `rgba(255, 220, 0, ${p.glow})`);
-            gradient.addColorStop(0.7, `rgba(255, 200, 0, ${p.glow * 0.6})`);
-            gradient.addColorStop(1, `rgba(255, 150, 0, 0)`);
+            
+            if (p.type === 'red') {
+                // Красный приз: насыщенный градиент
+                gradient.addColorStop(0, `rgba(255, 80, 80, ${p.glow * 1.2})`);
+                gradient.addColorStop(0.6, `rgba(220, 40, 40, ${p.glow * 0.8})`);
+                gradient.addColorStop(1, `rgba(180, 0, 0, 0)`);
+            } else {
+                // Золотой приз (оригинальный)
+                gradient.addColorStop(0, `rgba(255, 220, 0, ${p.glow})`);
+                gradient.addColorStop(0.7, `rgba(255, 200, 0, ${p.glow * 0.6})`);
+                gradient.addColorStop(1, `rgba(255, 150, 0, 0)`);
+            }
             
             ctx.fillStyle = gradient;
             ctx.beginPath();
             ctx.arc(0, 0, p.r, 0, Math.PI * 2);
             ctx.fill();
             
-            // Контур
-            ctx.strokeStyle = `rgba(255, 255, 200, ${p.glow * 0.8})`;
+            // Контур: адаптивный под цвет
+            ctx.strokeStyle = p.type === 'red' 
+                ? `rgba(255, 200, 200, ${p.glow * 0.7})` 
+                : `rgba(255, 255, 200, ${p.glow * 0.8})`;
             ctx.lineWidth = 2;
             ctx.stroke();
+            
+            // Добавляем "искрящийся" эффект для красного приза
+            if (p.type === 'red') {
+                ctx.beginPath();
+                ctx.arc(0, 0, p.r * 0.4, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(255, 255, 255, ${p.glow * 0.3})`;
+                ctx.fill();
+            }
             
             ctx.restore();
         }
@@ -553,7 +582,8 @@
         let dt = t - last; if (!isFinite(dt) || dt <= 0) dt = 16; dt = Math.min(dt, 100);
         last = t;
         if(!running) return;
-        if(t - lastSpawn > spawnInterval){ spawn(); lastSpawn = t; spawnInterval = Math.max(350, 800 - score*3); }
+        spawnInterval_current = Math.max(350, spawnInterval_current - spawnInterval_increase);
+        if(t - lastSpawn > spawnInterval){ spawn(); lastSpawn = t; spawnInterval = Math.max(350, spawnInterval_current); } //score*3
         update(dt);
         draw();
         requestAnimationFrame(frame);
@@ -577,37 +607,43 @@
             
             // Проверяем попадание в круг приза
             if (dx * dx + dy * dy <= p.r * p.r * 2) {
+                // Определяем тип приза и параметры
+                const isRed = p.type === 'red';
+                const points = isRed ? 100 : 50; // Красный = 100 очков
+                const particleType = isRed ? 'redFire' : 'fire';
+                const particleCount = isRed ? 35 : 25; // Больше частиц для красного
+                
                 // Удаляем приз
                 prizes.splice(i, 1);
                 
                 // Начисляем очки
-                score += 50;
+                score += points;
                 scoreEl.textContent = 'Очки: ' + score;
                 
-                // Эффект сбора: золотые частицы
-                for (let j = 0; j < 25; j++) {
+                // Эффект сбора
+                for (let j = 0; j < particleCount; j++) {
                     particles.push({
                         x: p.x,
                         y: p.y,
-                        vx: rand(-2.5, 2.5),
-                        vy: rand(-2.5, -0.5), // летят вверх
-                        life: 600 + Math.random() * 400,
+                        vx: rand(-3, 3),
+                        vy: rand(-3.5, -1), // Быстрее вверх для красного
+                        life: isRed ? 800 + Math.random() * 300 : 600 + Math.random() * 400,
                         t: 0,
-                        size: rand(2, 5),
-                        type: 'fire' // используем огненные частицы для золотого эффекта
+                        size: rand(2, isRed ? 6 : 5),
+                        type: particleType
                     });
                 }
                 
-                // Звук сбора (безопасное воспроизведение)
+                // Звук: для красного приза громче и короче
                 try {
-                    // Создаём клон звука взрыва для сбора (тише и короче)
                     const collectSound = explosionSound.cloneNode();
-                    collectSound.volume = basic_explosion_volume * 0.3;
+                    collectSound.volume = isRed 
+                        ? basic_explosion_volume * 0.5  // Громче для красного
+                        : basic_explosion_volume * 0.3;
                     collectSound.play().catch(() => {});
                 } catch (e) {
-                    console.log('Звук сбора недоступен, но приз собран');
+                    console.log('Звук сбора недоступен');
                 }
-                
                 // ВАЖНО: не прерываем функцию — лазер всё равно выстрелит в этом направлении
             }
         }
