@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Защити город</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <script defer src="/static/js/game.js"></script>
+</head>
+<body>
+  <div class="ui">
+    <div id="score">Очки: 0</div>
+    <button id="show-leaderboard">Таблица лидеров</button>
+  </div>
+  <canvas id="gameCanvas"></canvas>
+
+  <div id="overlay" class="hidden" style="display:none;pointer-events:none;">
+    <div id="gameover">
+      <h2>Игра окончена</h2>
+      <div id="final-score"></div>
+      <div id="name-form" class="hidden" style="display:none;pointer-events:auto;">
+        <input id="name-input" placeholder="Введите имя" maxlength="32" />
+        <button id="submit-name">Сохранить в топ-5</button>
+      </div>
+      <button id="restart">Играть снова</button>
+    </div>
+  </div>
+
+  <div id="leaderboard-panel" class="hidden" style="display:none;pointer-events:auto;">
+    <h3>Топ-5</h3>
+    <ol id="leaderboard-list"></ol>
+    <button id="close-leaderboard">Закрыть</button>
+  </div>
+</body>
+</html>

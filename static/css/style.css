@@ -1,0 +1,8 @@
+html,body{height:100%;margin:0;font-family:Arial, sans-serif}
+#gameCanvas{display:block;width:100vw;height:100vh}
+.ui{position:fixed;top:8px;left:8px;z-index:20;display:flex;gap:8px}
+#score{background:rgba(255,255,255,0.9);padding:6px 10px;border-radius:6px}
+#overlay{position:fixed;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:30}
+.hidden{display:none}
+#gameover{background:#fff;padding:20px;border-radius:8px;text-align:center}
+#leaderboard-panel{position:fixed;right:12px;top:12px;background:#fff;padding:12px;border-radius:6px;z-index:40}
