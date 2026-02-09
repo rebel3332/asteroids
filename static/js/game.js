@@ -428,14 +428,15 @@
             // em it smoke trail particles (realistic black smoke)
             for(let j = 0; j < 3; j++){
                 particles.push({
-                x: a.x + rand(-a.r*0.3, a.r*0.3), 
-                y: a.y + rand(-a.r*0.3, a.r*0.3),
-                vx: rand(-0.3, 0.3), 
-                vy: rand(-0.2, 0.2),
-                life: 800 + Math.random()*600,
-                t: 0,
-                size: a.r * (0.15 + Math.random()*0.2),
-                type: 'smoke'
+                    x: a.x + rand(-a.r*0.3, a.r*0.3), 
+                    y: a.y + rand(-a.r*0.3, a.r*0.3),
+                    vx: rand(-0.3, 0.3), 
+                    vy: rand(-0.2, 0.2),
+                    life: 800 + Math.random()*600,
+                    t: 0,
+                    size: a.r * (0.15 + Math.random()*0.2),
+                    type: 'smoke',
+                    drift: 0
                 });
             }
             if(a.y - a.r > h){ gameOver(); return; }
